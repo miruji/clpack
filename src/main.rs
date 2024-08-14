@@ -63,10 +63,11 @@ async fn main() -> io::Result<()> {
   let mut error: bool = true;
   if args.len() > 1 {
     let firstArg = &args[1];
-    let mut connection: Option<String> = getConnection(); // get back connection
+  // no connection part
     // version
     if firstArg == "version" {
       log("bold",&format!("clpack v{}",*_version));
+      error = false;
     } else
     // help
     // e:  help
@@ -86,65 +87,6 @@ async fn main() -> io::Result<()> {
       log("help","┗ server|━━━━━━━━━━━━━━━━━╾  Start server cloud");
       error = false;
     } else
-    // join
-    // e:  join 127.0.0.1
-    if firstArg == "join" {
-      if args.len() == 3 {
-        let secondArg = &args[2];
-        log("ok",&format!("Join to \"{}\" server and save connection",secondArg));
-        error = false;
-        setConnection(secondArg.to_string());
-        connection = Some(secondArg.to_string());
-        //
-        client("join").await.unwrap();
-      } else {
-        log("err","Use the [join <server ip>] flag");
-      }
-    } else
-    // send
-    // e:  send test.txt
-    if firstArg == "send" {
-      if args.len() == 3 {
-        let secondArg = &args[2];
-        log("ok",&format!("[] Send file \"{}\"",secondArg));
-        error = false;
-        //
-        if connection != None {
-          client(&format!("send {}",secondArg)).await.unwrap();
-        }
-      } else {
-        log("err","Use the [send <file>] flag");
-      }
-    } else
-    // get
-    // e:  get 1 test.txt
-    if firstArg == "get" {
-      if args.len() == 4 {
-        let secondArg: &str = &format!("get {} {}",args[2],args[3]);
-        log("ok",&format!("[->] \"{}\"",secondArg));
-        error = false;
-        //
-        if connection != None {
-          client(secondArg).await.unwrap();
-        }
-      } else {
-        log("err","Use the [get <file id> <file to>] flag");
-      }
-    }
-    // list
-    // e:  list
-    if firstArg == "list" {
-      if let Some(connection) = connection {
-        log("ok",&format!("Server: {}",connection));
-        log("ok","Files list");
-        error = false;
-        //
-        // todo: 
-        //   > server: connections, commands in line
-        //   > client: get ip - files
-        client("list").await.unwrap();
-      }
-    } else
     // server
     // e:  server
     if firstArg == "server" {
@@ -156,7 +98,71 @@ async fn main() -> io::Result<()> {
           server(&mut filesList).await.unwrap();
       });
       serverTask.await.unwrap();
+  // connection [no joined] part
+    } else {
+      let mut connection: Option<String> = getConnection(); // get back connection
+      // join
+      // e:  join 127.0.0.1
+      if firstArg == "join" {
+        if args.len() == 3 {
+          let secondArg = &args[2];
+          log("ok",&format!("Join to \"{}\" server and save connection",secondArg));
+          error = false;
+          setConnection(secondArg.to_string());
+          connection = Some(secondArg.to_string());
+          //
+          client("join").await.unwrap();
+        } else {
+          log("err","Use the [join <server ip>] flag");
+        }
+  // connection [joined] part
+      } else
+      if let Some(connection) = connection {
+        // send
+        // e:  send test.txt
+        if firstArg == "send" {
+          if args.len() == 3 {
+            let secondArg = &args[2];
+            log("ok",&format!("[] Send file \"{}\"",secondArg));
+            error = false;
+            //
+            client(&format!("send {}",secondArg)).await.unwrap();
+          } else {
+            log("err","Use the [send <file>] flag");
+          }
+        } else
+        // get
+        // e:  get 1 test.txt
+        if firstArg == "get" {
+          if args.len() == 4 {
+            let secondArg: &str = &format!("get {} {}",args[2],args[3]);
+            log("ok",&format!("[->] \"{}\"",secondArg));
+            error = false;
+            //
+            client(secondArg).await.unwrap();
+          } else {
+            log("err","Use the [get <file id> <file to>] flag");
+          }
+        } else
+        // list
+        // e:  list
+        if firstArg == "list" {
+          log("ok",&format!("Server: {}",connection));
+          log("ok","Files list");
+          error = false;
+          //
+          // todo: 
+          //   > server: connections, commands in line
+          //   > client: get ip - files
+          client("list").await.unwrap();
+        }
+        //
+      } else {
+        log("err","No connection");
+        logExit();
+      }
     }
+    //
   }
   if error {
     log("err","Use the [help] flag to show flags list");
@@ -214,7 +220,7 @@ async fn server(filesList: &mut Vec<(String,String,String)>) -> std::io::Result<
   loop {
     let (len, addr) = socket.recv_from(&mut buf).await?;
     let requestString: String = String::from_utf8_lossy(&buf[..len]).to_string();
-    println!("Request '{}' from {}", requestString.len()/*requestString*/, addr);
+    println!("[you] <- [{}] {}",addr,sliceString(&requestString));
 
     // use command
     let mut response: String = String::new();
@@ -222,13 +228,9 @@ async fn server(filesList: &mut Vec<(String,String,String)>) -> std::io::Result<
     match requestParts[0] {
       // join
       "join" => {
-        println!("   !!! 111");
-        println!("  > join");
       },
       // list
       "list" => {
-        println!("   !!! 222");
-        println!("  > list len: {}",filesList.len());
         for file in &mut *filesList {
           //println!("    - {}",file.0);
           response += &format!("{} {}  ", file.0, file.1);
@@ -236,15 +238,22 @@ async fn server(filesList: &mut Vec<(String,String,String)>) -> std::io::Result<
       },
       // get
       "get" => {
-        println!("   !!! 333");
-        println!("  > get: {}",requestParts[1]);
-        response += &filesList[requestParts[1].parse::<usize>().unwrap() as usize].2;
+        let fileNum: usize = requestParts[1].parse::<usize>().unwrap();
+        if fileNum < filesList.len() { // get num < files list len
+          let file = &filesList[fileNum];
+          if let Some(hexString) = compressFile( &format!("./server/{} {}",file.0,file.1) ) {
+            response += &hexString;
+          }
+        }
       },
       // send (save in server)
       _ => {
-        println!("   !!! 444");
         if requestParts.len() == 3 { // todo: error handler
-          let data: String = requestParts[2].to_string()+&largeResponse(&socket).await?;
+          let mut data: String = requestParts[2].to_string(); // get first packet
+          if requestString.len() >= maxPacketSize {           // get next packets, if > maxPacketSize
+            data += &largeResponse(&socket).await?;
+          }
+          // decompress and save
           if let Some(data) = decompress(&data) {
             bytesToFile(
               &format!(
@@ -255,7 +264,8 @@ async fn server(filesList: &mut Vec<(String,String,String)>) -> std::io::Result<
               &data   // data
             );
           }
-          filesList.push( (requestParts[0].to_string(),requestParts[1].to_string(),data) );
+          // push to server list
+          filesList.push( (requestParts[0].to_string(),requestParts[1].to_string(),String::from("0")) );
         }
         //
       }
@@ -282,22 +292,22 @@ async fn client(arg: &str) -> std::io::Result<()> {
     let filePath = parts[1];
     println!("filePath: {}",filePath);
     if let Some(hexString) = compressFile(filePath) {
-      let responce:      String = parts[1].to_owned()+" "+&getCurrentTime()+" "+&hexString;
-      let responceBytes: &[u8]  = responce.as_bytes();
-      largeRequest(&socket,&addr,&responce).await?;
-      println!("[you -> {}] {:?}",addr,responce);
+      let response:      String = parts[1].to_owned()+" "+&getCurrentTime()+" "+&hexString;
+      //let responseBytes: &[u8]  = response.as_bytes();
+      largeRequest(&socket,&addr,&response).await?;
+      println!("[you -> {}] {}",addr,sliceString(&response));
     } else {
       eprintln!("Error during compression.");
     }
   // other
   } else {
     largeRequest(&socket,&addr,&arg).await?;
-    println!("[you -> {}] {:?}",addr,arg);
+    println!("[you -> {}] {}",addr,sliceString(&arg));
   }
 
   // response
   let responseString: String = largeResponse(&socket).await?;
-  println!("[you <- {}] \"{}\"",addr,responseString);
+  println!("[you <- {}] {}",addr,sliceString(&responseString));
 
   if parts.get(0) == Some(&"list") {
     let leftPart: Vec<&str> = responseString.trim_end().split("  ").collect();
@@ -360,36 +370,10 @@ fn getCurrentTime() -> String {
   )
 }
 
-// save bytes to file, and if needed create directory
-fn bytesToFile(fileName: &str, content: &Vec<u8>) -> Option<()> {
-  // Получаем путь к файлу
-  let path = Path::new(fileName);
-
-  // Получаем путь к директории, в которой будет создан файл
-  if let Some(parent) = path.parent() {
-    // Создаем директорию, если она не существует
-    if create_dir_all(parent).is_err() {
-      return None;
-    }
-  }
-
-  // Создаем и открываем файл для записи
-  let mut file = match File::create(fileName) {
-    Ok(f) => f,
-    Err(_) => return None,
-  };
-
-  // Записываем данные в файл
-  if let Err(_) = file.write_all(content) {
-    return None;
-  }
-
-  Some(())
-}
-
 // compress file
-use base64;
+// use base64;
 // todo: compress bytes and send bytes, not String !!!
+// todo: use zstd + base64 + word crypt
 fn compressFile(filePath: &str) -> Option<String> {
     let mut file = File::open(filePath).ok()?;
     let mut buffer = Vec::new();
@@ -398,7 +382,6 @@ fn compressFile(filePath: &str) -> Option<String> {
     let hexString = buffer.iter().map(|b| format!("{:02x}", b)).collect::<String>();
     Some(hexString)
 }
-
 fn decompressFile(outputPath: &str, hexString: &str) -> Option<()> {
     let bytes = (0..hexString.len())
         .step_by(2)
@@ -409,102 +392,101 @@ fn decompressFile(outputPath: &str, hexString: &str) -> Option<()> {
     file.write_all(&bytes).ok()?;
     Some(())
 }
-/*
-fn compressFile(filePath: &str) -> Option<String> {
-  // Открываем файл
-  let mut file = File::open(filePath).ok()?;
-  let mut buffer = Vec::new();
-  file.read_to_end(&mut buffer).ok()?;
-  
-  // Сжимаем данные с использованием zstd
-  /*
-  let mut encoder = Encoder::new(Vec::new(), 0).ok()?;
-  encoder.write_all(&buffer).ok()?;
-  let compressed = encoder.finish().ok()?;
-  */
-  
-  // Преобразуем байты в hex строку
-  let hexString = compressed.iter().map(|b| format!("{:02x}", b)).collect::<String>();
-  Some(hexString)
+// save bytes to file, and if needed create directory
+fn bytesToFile(fileName: &str, content: &Vec<u8>) -> Option<()> {
+  let path = Path::new(fileName);
 
-  // Кодируем сжатые данные в base64 и возвращаем их как строку
-  //let compressedBase64 = base64::encode(&compressed);
-  //Some(compressedBase64)
-}
-// decompress file
-fn decompressFile(outputPath: &str, hexString: &str) -> Option<()> {
-  // Преобразуем hex строку обратно в байты
-  let compressed: Vec<u8> = (0..hexString.len())
-    .step_by(2)
-    .map(|i| u8::from_str_radix(&hexString[i..i+2], 16))
-    .collect::<Result<Vec<u8>, _>>()
-    .ok()?;
-  
-  // Декомпрессируем данные
-  let mut decoder = Decoder::new(&compressed[..]).ok()?;
-  let mut decompressed = Vec::new();
-  decoder.read_to_end(&mut decompressed).ok()?;
-  
-  // Записываем декомпрессированные данные в файл
-  let mut outputFile = File::create(outputPath).ok()?;
-  outputFile.write_all(&decompressed).ok()?;
-  
+  // directory
+  if let Some(parent) = path.parent() {
+    // create if exists
+    if create_dir_all(parent).is_err() {
+      return None;
+    }
+  }
+
+  // create file
+  let mut file = match File::create(fileName) {
+    Ok(f) => f,
+    Err(_) => return None,
+  };
+
+  // write data to file
+  if let Err(_) = file.write_all(content) {
+    return None;
+  }
+
   Some(())
 }
-*/
-// decompress
+// decompress str to bytes
 fn decompress(hexString: &str) -> Option<Vec<u8>> {
-    // Преобразуем hex строку обратно в байты
-    let compressed: Result<Vec<u8>, ParseIntError> = (0..hexString.len())
+    let bytes: Result<Vec<u8>, ParseIntError> = (0..hexString.len())
         .step_by(2)
         .map(|i| u8::from_str_radix(&hexString[i..i+2], 16))
         .collect();
-    
-    let compressed = match compressed {
-        Ok(data) => data,
-        Err(_) => return None,
-    };
 
-    // Декомпрессируем данные
-    let mut decoder = match Decoder::new(&compressed[..]) {
-        Ok(decoder) => decoder,
-        Err(_) => return None,
-    };
+    match bytes {
+        Ok(b) => Some(b),
+        Err(_) => None,
+    }
+}
+
+// slice of string
+fn sliceString(input: &str) -> String {
+    let mut space_count = 0;
+    let mut truncateIndex = None;
     
-    let mut decompressed = Vec::new();
-    if let Err(_) = decoder.read_to_end(&mut decompressed) {
-        return None;
+    for (index, char) in input.char_indices() {
+        if char == ' ' {
+            space_count += 1;
+            if space_count == 3 {
+                truncateIndex = Some(index);
+                break;
+            }
+        }
     }
 
-    Some(decompressed)
+    // if spaces
+    if let Some(index) = truncateIndex {
+        let truncated = &input[..index];
+        let byte_count = truncated.len();
+        return format!("{}<{} bytes>", truncated, byte_count);
+    }
+    // if bytest
+    if input.len() > 32 {
+        let truncated = &input[..32];
+        let byte_count = truncated.len();
+        return format!("<{} bytes>", byte_count);
+    // if basic
+    } else {
+        return format!("{}", input);
+    }
 }
+
 
 // get save server files
 // todo: check directory exists
 fn getServerFiles(path: &str) -> io::Result<Vec<(String,String,String)>> {
     let mut result = Vec::new();
+    let entries    = fs::read_dir(path)?; // get dir files
 
-    // Получаем список файлов в папке
-    let entries = fs::read_dir(path)?;
-
-    // Перебираем файлы
+    // read files
     for entry in entries {
       let entry = entry?;
-      let path = entry.path();
+      let path  = entry.path();
 
+      // if file then get name-data
       if path.is_file() {
-        // Если это файл, получаем его название и содержимое
-        let file_name: String = path.file_name()
+        let fileName: String = path.file_name()
           .and_then(|name| name.to_str())
           .unwrap_or("")
           .to_string();
 
-        let parts: Vec<&str> = file_name.split(" ").collect();
+        let parts: Vec<&str> = fileName.split(" ").collect();
         let content = fs::read_to_string(&path).unwrap_or_else(|_| String::from("Failed to read file"));
 
         result.push((parts[0].to_string(),parts[1].to_string(),content));
+      // todo: error
       } else {
-        // Если это не файл, можем вывести предупреждение или просто пропустить
         println!("Skipping non-file entry: {:?}", path.display());
       }
     }
